@@ -1,0 +1,49 @@
+{
+  "name": "n2-k8s",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "babel": "babel --only **/*.js,**/*.json --ignore *.pl --root-mode upward --presets @babel/env src --out-dir build",
+    "build": "npm run babel",
+    "configs": "npm run babel && node build/index.js create configurations",
+    "certs": "npm run babel && node build/index.js create certificates",
+    "rules": "npm run babel && node build/index.js create rules",
+    "start": "npm run babel && node build/index.js start",
+    "update": "npm run babel && node build/index.js update",
+    "distro": "npm run babel && node build/index.js distribute",
+    "distribute": "npm run babel && node build/index.js distribute",
+    "reset": "npm run babel && node build/index.js reset",
+    "status": "npm run babel && node build/index.js status",
+    "create": "npm run babel && node build/index.js create",
+    "up": "npm run babel && node build/index.js up",
+    "down": "npm run babel && node build/index.js down",
+    "teardown": "npm run babel && node build/index.js teardown",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@babel/polyfill": "^7.2.5",
+    "config": "^3.0.1",
+    "ejs": "^2.6.1",
+    "js-base64": "^2.5.1",
+    "jws": "^3.2.1",
+    "netmask": "^1.0.6",
+    "pem": "^1.14.2",
+    "randomstring": "^1.1.5",
+    "range": "0.0.3",
+    "shelljs": "^0.8.3",
+    "yaml": "^1.3.2"
+  },
+  "devDependencies": {
+    "@babel/cli": "^7.2.3",
+    "@babel/core": "^7.3.3",
+    "@babel/plugin-proposal-class-properties": "^7.3.3",
+    "@babel/preset-env": "^7.3.1",
+    "yargs": "^13.2.1"
+  }
+}

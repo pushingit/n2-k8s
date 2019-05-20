@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+mkdir -p /etc/etcd /var/lib/etcd \
+      /usr/local/bin \
+      /var/lib/kubernetes /etc/kubernetes/config
+
+if [[ -z `which ping` ]]; then
+apt-get update -y
+dpkg --configure -a
+apt-get install -y vim wget nginx less telnet file iputils-ping
+fi
+
+KUBEVER=1.13.0
+if [[ ! -f /usr/local/bin/kubectl ]]; then
+wget -q --show-progress --https-only --timestamping \
+  "https://github.com/coreos/etcd/releases/download/v3.3.9/etcd-v3.3.9-linux-amd64.tar.gz" \
+  "https://storage.googleapis.com/kubernetes-release/release/v${KUBEVER}/bin/linux/amd64/kube-apiserver" \
+  "https://storage.googleapis.com/kubernetes-release/release/v${KUBEVER}/bin/linux/amd64/kube-controller-manager" \
+  "https://storage.googleapis.com/kubernetes-release/release/v${KUBEVER}/bin/linux/amd64/kube-scheduler" \
+  "https://storage.googleapis.com/kubernetes-release/release/v${KUBEVER}/bin/linux/amd64/kubectl"
+
+tar -xvf etcd-v3.3.9-linux-amd64.tar.gz  
+chmod +x kube-apiserver kube-controller-manager kube-scheduler kubectl
+
+mv etcd-v3.3.9-linux-amd64/etcd* \
+   kube-apiserver kube-controller-manager kube-scheduler kubectl /usr/local/bin/
+fi
+
+
+if [[ -f kube-scheduler.yaml ]]; then
+cp ca.pem kubernetes-key.pem kubernetes.pem /etc/etcd/
+mv ca.pem ca-key.pem kubernetes-key.pem kubernetes.pem \
+   service-account-key.pem service-account.pem encryption-config.yaml \
+   k*.kubeconfig /var/lib/kubernetes/
+mv kube-scheduler.yaml /etc/kubernetes/config/
+fi
+
+[[ -f healthz.conf ]] && mv healthz.conf /etc/nginx/sites-available/
+[[ ! -s /etc/nginx/sites-enabled/healthz.conf ]] && \
+    ln -s /etc/nginx/sites-available/healthz.conf /etc/nginx/sites-enabled/healthz.conf
+mv *.service /etc/systemd/system
+
+systemctl daemon-reload
+systemctl enable etcd kube-apiserver kube-controller-manager kube-scheduler nginx
+systemctl stop etcd kube-apiserver kube-controller-manager kube-scheduler nginx
+rm -rf /var/lib/etcd/*
+systemctl start etcd
+
+ETCDCTL_API=3 etcdctl member list \
+	   --endpoints=https://127.0.0.1:2379 \
+	   --cacert=/etc/etcd/ca.pem \
+	   --cert=/etc/etcd/kubernetes.pem \
+	   --key=/etc/etcd/kubernetes-key.pem
+
+journalctl --vacuum-time=1s
+
+systemctl start kube-apiserver
+sleep 3
+
+export KUBECONFIG=./admin.kubeconfig
+kubectl config use-context default
+while [[ -z `kubectl get componentstatuses | grep -E 'etcd.*Healthy'` ]]
+do
+    kubectl get componentstatuses | grep etcd
+    journalctl | grep kube | tail -5
+    sleep 3
+done
+sleep 10
+	   
+kubectl create -f kube-proxy-rbac.yaml
+kubectl create -f kubelet.yaml
+kubectl create -f kubernetes.yaml
+# TODO: only one once (first controller, or locally)
+kubectl create -f bootstrappers.yaml
+
+for secret in bootstrap_secret-worker*.yaml; do
+    kubectl create -f $secret || kubectl apply -f $secret
+done
+for configmap in bootstrap_configmap-worker*.yaml; do
+    kubectl create -f $configmap || kubectl apply -f $configmap
+done
+
+systemctl start kube-scheduler
+while [[ -n `kubectl get componentstatuses | grep -E 'scheduler.*Unhealthy'` ]]
+do
+    kubectl get componentstatuses | grep scheduler
+    journalctl | grep kube | tail -5
+    sleep 3
+done
+sleep 8
+
+systemctl start kube-controller-manager
+while [[ -n `kubectl get componentstatuses | grep -E 'manager.*Unhealthy'` ]]
+do
+    kubectl get componentstatuses | grep manager
+    journalctl | grep kube | tail -5
+    sleep 3
+done
+
+systemctl start nginx

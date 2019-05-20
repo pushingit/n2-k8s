@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+KUBEVER=1.13.0
+CONTAINERDVER=1.2.4
+CNIPLUGINSVER=0.7.4
+RUNCVER=1.0.0-rc6
+
+#CRIVER=$KUBEVER
+CRIVER=1.13.0
+
+RUNC=https://github.com/opencontainers/runc/releases/download/v${RUNCVER}/runc.amd64
+RUNSC=https://storage.googleapis.com/gvisor/releases/nightly/latest/runsc
+CNIPLUGINS=https://github.com/containernetworking/plugins/releases/download/v${CNIPLUGINSVER}/cni-plugins-amd64-v${CNIPLUGINSVER}.tgz
+CONTAINERD=https://github.com/containerd/containerd/releases/download/v${CONTAINERDVER}/containerd-${CONTAINERDVER}.linux-amd64.tar.gz
+CRICTL=https://github.com/kubernetes-sigs/cri-tools/releases/download/v${CRIVER}/crictl-v${CRIVER}-linux-amd64.tar.gz
+
+mkdir -p /etc/kubernetes/config \
+      /etc/cni/net.d /opt/cni/bin \
+      /var/lib/kubelet /var/lib/kube-proxy /var/lib/kubernetes \
+      /var/run/kubernetes /etc/containerd /etc/docker
+if [[ -z `which ping` ]]; then
+    apt-get update -y
+    rm -f /etc/containerd/config.toml
+    dpkg --configure -a
+    apt-get install -y vim wget socat conntrack \
+	    less telnet ipset file iputils-ping \
+	    apt-transport-https ca-certificates curl gnupg-agent \
+	    software-properties-common
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
+    add-apt-repository \
+	"deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+    apt-get update -y
+    apt-get install -y docker-ce docker-ce-cli containerd.io
+fi
+
+if [[ ! -f /usr/local/bin/runsc ]]; then
+wget -q --show-progress --https-only --timestamping \
+  $CRICTL \
+  $RUNC \
+  $RUNSC \
+  $CNIPLUGINS \
+  $CONTAINERD \
+  https://storage.googleapis.com/kubernetes-release/release/v${KUBEVER}/bin/linux/amd64/kubectl \
+  https://storage.googleapis.com/kubernetes-release/release/v${KUBEVER}/bin/linux/amd64/kube-proxy \
+  https://storage.googleapis.com/kubernetes-release/release/v${KUBEVER}/bin/linux/amd64/kubelet
+
+mv runc.amd64 runc
+chmod +x kubectl kube-proxy kubelet runc runsc
+mv kubectl kube-proxy kubelet runc runsc /usr/local/bin/
+tar -xvf crictl-v${KUBEVER}-linux-amd64.tar.gz -C /usr/local/bin/
+tar -xvf cni-plugins-amd64-v${CNIPLUGINSVER}.tgz -C /opt/cni/bin/
+#tar -xvf containerd-${CONTAINERDVER}.linux-amd64.tar.gz -C /
+fi
+
+[[ -f 10-bridge.conf ]] && mv 99-loopback.conf 10-bridge.conf /etc/cni/net.d/
+[[ -f config.toml  ]] && mv config.toml /etc/containerd/
+
+[[ -f ca.pem  ]] && mv ca.pem /var/lib/kubernetes
+
+[[ -f <%= instance %>.pem  ]] && mv <%= instance %>.pem <%= instance %>-key.pem kubelet-config.yaml /var/lib/kubelet
+
+#[[ -f <%= instance %>.kubeconfig ]] && mv <%= instance %>.kubeconfig /var/lib/kubelet/kubeconfig
+[[ -f /var/lib/kubelet/kubeconfig ]] && rm /var/lib/kubelet/kubeconfig
+[[ -f kubelet-bootstrap.kubeconfig ]] && mv kubelet-bootstrap.kubeconfig /var/lib/kubelet/
+
+[[ -f kube-proxy-config.yaml ]]  && mv kube-proxy-config.yaml /var/lib/kube-proxy/
+[[ -f kube-proxy.kubeconfig ]]  && mv kube-proxy.kubeconfig /var/lib/kube-proxy/kubeconfig
+
+[[ -f kube-proxy.service ]]  && mv kubelet.service kube-proxy.service /etc/systemd/system/
+#[[ -f containerd.service ]]  && mv containerd.service /etc/systemd/system/
+[[ -f daemon.json ]] && mv daemon.json /etc/docker/
+
+systemctl daemon-reload
+systemctl restart docker
+sleep 3
+systemctl enable kubelet kube-proxy
+journalctl --vacuum-time=1s
+systemctl start kube-proxy
+sleep 5
+systemctl start kubelet
+
+

@@ -1,1 +1,9 @@
+.*
 *~
+*.pem
+*.csr
+build/
+*local.*
+*#*
+node_modules
+files/
